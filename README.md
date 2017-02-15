@@ -1,5 +1,6 @@
 # UBER Challenge
-Solution to the UBER Challenge
+**Solution to the UBER Challenge**
+*by Sergio Escobedo* 
 # Part 1-SQL Syntax
 
 ##Excercise 1
