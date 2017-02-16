@@ -9,7 +9,7 @@
 
 Assuming a PostgreSQL database, server timezone UTC
 
-         select avg(actual_eta-predicted_eta),
+        select avg(actual_eta-predicted_eta),
                percentile_cont(0.5) WITHIN GROUP (ORDER BY actual_eta-predicted_eta)
         from trips a left join cities b on 
               a.city_id=b.city_id
