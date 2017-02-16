@@ -66,7 +66,158 @@ Assuming a PostgreSQL database, server timezone UTC and that a "rider" becomes a
 
 # Part 2-Experiment and metrics design
 
+   Answered in http://prezi.com/ae1zxixs9bma/?utm_campaign=share&utm_medium=copy 
+
 # Part 3-Data analysis
+
+        library(sqldf)
+        library(dplyr)
+        library(xtable)
+        library(dplyr)
+        library(rpart)
+        library(rattle)
+        library(rpart.plot)
+        library(RColorBrewer)
+        library(ggplot2)
+
+        ####Analysis and Visualitation####
+
+        #getting the data
+        Ch_01<- read.csv(file="ds_challenge_v2_data_(4)_(1).csv", header=TRUE, sep=",")
+
+        #formatting variables
+        Ch_01$signup_date<-as.Date(Ch_01$signup_date,"%d/%m/%y")
+        Ch_01$bgc_date<-as.Date(Ch_01$bgc_date,"%d/%m/%y")
+        Ch_01$vehicle_added_date<-as.Date(Ch_01$vehicle_added_date,"%d/%m/%y")
+        Ch_01$first_completed_date<-as.Date(Ch_01$first_completed_date,"%d/%m/%y")
+
+        #indicator of complete trip
+        Ch_01$complete<-ifelse(is.na(Ch_01$first_completed_date)==TRUE,0,1)
+        Ch_01$complete<-factor(Ch_01$complete)
+
+        #Calculation of auxiliar variables
+        Ch_01$sign_bgc<-as.numeric(difftime(Ch_01$bgc_date ,Ch_01$signup_date, units = c("days")))
+        Ch_01$bgc_vad<-as.numeric(difftime(Ch_01$vehicle_added_date ,Ch_01$bgc_date, units = c("days")))
+        Ch_01$sign_vad<-as.numeric(difftime(Ch_01$vehicle_added_date ,Ch_01$signup_date, units = c("days")))
+        Ch_01$sign_fcd<-as.numeric(difftime(Ch_01$first_completed_date ,Ch_01$signup_date, units = c("days")))
+        Ch_01$complete<-factor(Ch_01$complete)
+        Ch_01$quartile_sf <- ntile(Ch_01$sign_fcd,40) 
+
+        head(Ch_01)
+        tail(Ch_01)
+        dim(Ch_01)
+        names(Ch_01)
+        str(Ch_01)
+        summary(Ch_01)
+        glimpse(Ch_01)
+
+
+        hist(Ch_01$sign_bgc,main="Histogram of the time bt signup and bakground check")
+        hist(Ch_01$bgc_vad,main="Histogram of the time bt background check and vehicle added")
+        hist(Ch_01$sign_vad,main="Histogram of the time bt signup and vehicle added")
+        hist(Ch_01$sign_fcd,main="Histogram of the time bt signup and first completed")
+
+        boxplot(Ch_01$sign_bgc,main="Histogram of the time bt signup and bakground check")
+        boxplot(Ch_01$bgc_vad,main="Histogram of the time bt background check and vehicle added")
+        boxplot(Ch_01$sign_vad,main="Histogram of the time bt signup and vehicle added")
+        boxplot(Ch_01$sign_fcd,main="Histogram of the time bt signup and first completed")
+
+
+
+        boxplot(sign_fcd~city_name,data=Ch_01, main="Days between sign up and first completed ride",xlab="City",ylab="Days")
+        boxplot(sign_vad~city_name,data=Ch_01, main="Days between sign up and first completed ride",xlab="City",ylab="Days")
+        boxplot(sign_bgc~city_name,data=Ch_01, main="Days between sign up and first completed ride",xlab="City",ylab="Days")
+
+
+        plot(Ch_01$city_name,Ch_01$complete)
+        plot(Ch_01$signup_channel,Ch_01$signup_os)
+
+        hist(Ch_01$signup_date, breaks=32)
+        hist(Ch_01$complete)
+
+        xtab = xtabs(~ city_name + quartile_sf , data=Ch_01)
+        ptbl = prop.table(xtab, margin=1)
+        ptbl
+        #to searh for the limits of the quartiles
+        table(Ch_01$quartile_sf,Ch_01$sign_fcd)
+
+        #now we can se that quantile are like [1-5],(5-9],(9-14],(14-23],(23,30] so we can see 
+        #that Berton and Strark has near of the 50% in the first 9 days vs Wrouver wich is 30%
+
+        ####Cleansing####
+
+        #looking the summary asumming a funnel of sign up cannot be possible to add a car when you dont even sign up in the system
+        #so i decide to remove this case i mean is just one case
+
+        Ch_01<-filter(Ch_01,Ch_01$sign_vad>0 | is.na(Ch_01$sign_vad)==TRUE |Ch_01$sign_vad==0 )
+
+
+
+        ####Missingness####
+        #i can infer that in our target variable wich is if the driver has been completed a trip, 
+        #the missing data is an indicator for the drivers didn't has complete a trip so this is not a problem
+
+
+        ####Modeling####
+        set.seed(1)
+
+        # Shuffle the dataset, call the result shuffled
+        n <- nrow(Ch_01)
+        shuffled <- Ch_01[sample(n),]
+
+        # Split the data in train and test
+        train_indices<-1:round(0.7*n)
+        train<-shuffled[train_indices,]
+
+        test_indices <- (round(0.7 * n) + 1):n
+        test <- shuffled[test_indices, ]
+
+        str(train)
+        str(test)
+
+        #tree<-rpart(complete~.,train,method="class", parms = list(split = "information"))
+        tree<-rpart(complete~.,train,method="class", parms = list(split = "gini")) ###with gini chriterion
+        pred<-predict(tree,test,type="class")
+
+        conf<-table(test$complete,pred)
+
+        sum(diag(conf))/sum(conf)
+
+        prune<-prune(tree,cp=0.01)
+
+        prune
+
+        fancyRpartPlot(tree)
+        fancyRpartPlot(prune)
+
+
+        ####cross validation algorithm####
+        accs <- rep(0,7)
+
+        for (i in 1:7) {
+          indices <- (((i-1) * round((1/7)*nrow(shuffled))) + 1):((i*round((1/7) * nrow(shuffled))))
+
+          # Exclude them from the train set
+          train <- shuffled[-indices,]
+
+          # Include them in the test set
+          test <- shuffled[indices,]
+
+          # A model is learned using each training set
+          tree <- rpart(complete ~ ., train, method = "class")
+
+          # Make a prediction on the test set using tree
+          pred<-predict(tree,test,type="class")
+
+          # Assign the confusion matrix to conf
+          conf<-table(test$complete,pred)
+
+          # Assign the accuracy of this model to the ith index in accs
+          accs[i] <- sum(diag(conf))/sum(conf)
+        }
+
+        # Print out the mean of accs
+        mean(accs)
 
 
 
